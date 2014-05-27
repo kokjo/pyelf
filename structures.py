@@ -139,3 +139,8 @@ class RELA32(Packer):
         ("offset", "L", None),
         ("info", "L", None),
         ("addend", "l", None)]
+
+class DYN32(Packer):
+    fields_desc = [
+        ("tag", "L", DynTag),
+        ("valptr", "L", None)]
