@@ -42,6 +42,7 @@ class ProgramHeader(structures.PHDR32):
     def __repr__(self):
         return "<ProgramHeader 0x%x:0x%x(0x%x:0x%x) type:%r flags:%r>" % (self.vaddr,
                 self.memsz, self.offset, self.filesz, self.type, self.flags)
+
     @property
     def sections(self):
         if self.type == PT_PHDR:
@@ -52,6 +53,12 @@ class ProgramHeader(structures.PHDR32):
                 secs.append(sec)
         secs.sort(key=lambda sec: sec.offset)
         return secs
+
+    @property
+    def data(self):
+        if self.type == PT_LOAD:
+            return self.elffile.data[self.offset:][:self.filesz]+"\x00"*(self.memsz-self.filesz)
+        return ""
 
 class Symbol(structures.SYM32):
     def _set_symsection(self, section):
@@ -113,6 +120,27 @@ class Relocation(structures.REL32):
     @type.setter
     def type(self, value):
         self.info = ((self.symndx << 8) | (value & 0xff)) & 0xffffffff
+
+class MemoryViewer:
+    def __init__(self, elffile):
+        self.elffile = elffile
+        self.segments = elffile.loadable_segments
+
+    def __getitem__(self, slc):
+        if type(slc) == int:
+            slc = slice(slc, slc+1)
+        if slc.step != None:
+            raise IndexError("steps not supported")
+        data = ""
+        for seg in self.segments:
+            if seg.vaddr <= slc.start and seg.vaddr <= slc.stop:
+                off = slc.start-seg.vaddr
+                size = min(seg.filesz-off, slc.stop-slc.start)
+                data += seg.data[off:off+size]
+                slc = slice(slc.start+size, slc.stop)
+                if slc.stop <= slc.start:
+                    break
+        return data
 
 class ELFFile(object):
     def __init__(self, fp):
@@ -211,6 +239,15 @@ class ELFFile(object):
                 return sec
         return None
 
+    @property
+    def loadable_segments(self):
+        return [phdr for phdr in self.proghdrs if phdr.type == PT_LOAD]
+
+    @property
+    def memory(self):
+        return MemoryViewer(self)
+
+
 if __name__ == "__main__":
     import sys
     fp = open(sys.argv[1])
@@ -235,4 +272,7 @@ if __name__ == "__main__":
         print "  ", i, relsection, ":"
         for n, rel in enumerate(elf.relocations[relsection]):
             print n, ":", rel
+
+    print "Data at extrypoint:"
+    print elf.memory[elf.header.entry:elf.header.entry+16].encode("hex")
 
